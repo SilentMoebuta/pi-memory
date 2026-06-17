@@ -1,0 +1,33 @@
+{
+  "name": "pi-memory",
+  "version": "0.1.0",
+  "description": "Layered memory system for pi agent — L1/L2/L3 tiers with BM25 search, agent-delegated consolidation, and sql.js storage",
+  "keywords": ["pi-package", "memory", "agent-skills"],
+  "license": "MIT",
+  "author": "SilentMoebuta",
+  "main": "src/index.ts",
+  "pi": {
+    "extensions": ["./src/index.ts"],
+    "skills": ["./skills"],
+    "prompts": []
+  },
+  "files": ["src", "skills"],
+  "dependencies": {
+    "@earendil-works/pi-ai": "*",
+    "sql.js": "^1.11.0",
+    "toml": "^3.0.0",
+    "uuid": "^10.0.0"
+  },
+  "optionalDependencies": {
+    "nodejieba": "^2.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "@types/uuid": "^10.0.0"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}
