@@ -1,3 +1,8 @@
+---
+name: pi-memory
+description: Persistent three-tier memory (L1 auto-summary, L2 session summaries, L3 SQLite knowledge) for the pi agent. Use when the user asks to remember/forget something, when learning a reusable preference/decision/fact/procedure/correction worth keeping across sessions, or before starting work to recall relevant prior context. Provides memory_write/search/recall/forget/status tools and /memory-consolidate|/memory-status|/memory-export commands.
+---
+
 # Pi Memory
 
 Layered memory system for pi agent. Stores facts, decisions, preferences, procedures, and corrections across sessions.
