@@ -1,14 +1,23 @@
 import { Database } from 'sql.js';
 import { v4 as uuidv4 } from 'uuid';
-import { Memory, MemoryInput, MemoryStatus, SearchOptions, SearchResult, RecallResult, MemoryStats, ConsolidationResult } from '../types';
+import { Memory, MemoryInput, MemoryStatus, SearchOptions, SearchResult, RecallResult, MemoryStats } from '../types';
 import { BM25Index } from './search';
 
 export class MemoryManager {
+  // BM25 cache: rebuilt on demand, invalidated on any mutation to `memories`.
+  private bm25Cache: { project: string | undefined; status: MemoryStatus | undefined; docs: string[]; memories: Memory[]; index: BM25Index } | null = null;
+
   constructor(private db: Database) {}
+
+  /** Invalidate the BM25 cache (call after any mutation to `memories`). */
+  private invalidateSearchCache(): void {
+    this.bm25Cache = null;
+  }
 
   write(input: MemoryInput): Memory {
     const id = uuidv4();
     const now = Date.now();
+    this.invalidateSearchCache();
     this.db.run(
       `INSERT INTO memories (id, type, content, confidence, access_count, created_at, session_id, project, source, status)
        VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, 'active')`,
@@ -34,6 +43,7 @@ export class MemoryManager {
   forget(id: string): boolean {
     const existing = this.get(id);
     if (!existing) return false;
+    this.invalidateSearchCache();
     this.db.run('UPDATE memories SET status = ? WHERE id = ?', ['deleted', id]);
     return true;
   }
@@ -42,6 +52,8 @@ export class MemoryManager {
   runSql(sql: string, params?: any[]): void {
     if (params) this.db.run(sql, params);
     else this.db.run(sql);
+    // Invalidate cache when the SQL mutates the `memories` table.
+    if (/\bmemories\b/i.test(sql)) this.invalidateSearchCache();
   }
 
   execSql(sql: string, params?: any[]): any {
@@ -49,12 +61,36 @@ export class MemoryManager {
   }
 
   search(query: string, opts?: SearchOptions): SearchResult[] {
-    const memories = this.getAll(opts?.project, opts?.status);
+    // Wildcard / undefined project means "all projects" (used by regenL1Index).
+    const projectFilter = opts?.project && opts.project !== '*' ? opts.project : undefined;
+    const memories = this.getAll(projectFilter, opts?.status);
     if (memories.length === 0) return [];
 
+    // Empty query: BM25 gives every doc score 0 (filtered out), so skip BM25
+    // and return by recency/confidence (fallback ranking).
+    if (!query || query.trim().length === 0) {
+      let results: SearchResult[] = memories.map(m => ({ memory: m, score: 0 }));
+      if (opts?.type) {
+        results = results.filter(r => r.memory.type === opts.type);
+      }
+      results.sort((a, b) => {
+        if (b.memory.confidence !== a.memory.confidence) {
+          return b.memory.confidence - a.memory.confidence;
+        }
+        return b.memory.createdAt - a.memory.createdAt;
+      });
+      const limit = opts?.limit ?? 20;
+      return results.slice(0, limit);
+    }
+
+    // BM25 with caching: reuse index when project/status scope unchanged.
     const docs = memories.map(m => m.content);
-    const index = new BM25Index();
-    index.addDocuments(docs);
+    if (!this.bm25Cache || this.bm25Cache.project !== projectFilter || this.bm25Cache.status !== opts?.status) {
+      const index = new BM25Index();
+      index.addDocuments(docs);
+      this.bm25Cache = { project: projectFilter, status: opts?.status, docs, memories, index };
+    }
+    const index = this.bm25Cache.index;
 
     const bm25Results = index.search(query);
     let results: SearchResult[] = bm25Results.map(r => ({
@@ -160,13 +196,12 @@ export class MemoryManager {
       avgConfidence,
     };
   }
-  consolidate(project: string): ConsolidationResult {
-    throw new Error('consolidate not yet implemented');
-  }
   getAll(project?: string, status?: MemoryStatus): Memory[] {
+    // Wildcard '*' means all projects (used by regenL1Index / context injection).
+    const effectiveProject = project && project !== '*' ? project : undefined;
     let sql = 'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by FROM memories WHERE status != ?';
     const params: any[] = ['deleted'];
-    if (project) { sql += ' AND project = ?'; params.push(project); }
+    if (effectiveProject) { sql += ' AND project = ?'; params.push(effectiveProject); }
     if (status) { sql += ' AND status = ?'; params.push(status); }
     const rows = this.db.exec(sql, params);
     if (!rows.length) return [];

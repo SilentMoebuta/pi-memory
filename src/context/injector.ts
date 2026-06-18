@@ -1,5 +1,6 @@
 import { MemoryManager } from '../memory/memoryManager';
 import { MemoryStats } from '../types';
+import { loadConfig } from '../utils';
 
 export class ContextInjector {
   private injected = false;
@@ -8,11 +9,13 @@ export class ContextInjector {
 
   constructor(
     private manager: MemoryManager,
-    l1Budget = 1500,
-    l2Budget = 800,
+    l1Budget?: number,
+    l2Budget?: number,
   ) {
-    this.l1Budget = l1Budget;
-    this.l2Budget = l2Budget;
+    // Prefer config.toml values; fall back to constructor arg then defaults.
+    const config = loadConfig();
+    this.l1Budget = l1Budget ?? config?.memory?.l1_token_budget ?? 1500;
+    this.l2Budget = l2Budget ?? config?.memory?.l2_token_budget ?? 800;
   }
 
   buildContext(project: string): string {

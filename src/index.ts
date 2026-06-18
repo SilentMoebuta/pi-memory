@@ -92,7 +92,9 @@ export default async function piMemoryExtension(pi: any) {
           const engine = new ConsolidationEngine(manager);
           engine.runDecay(project, config.consolidation?.decay_days ?? 30, config.consolidation?.archive_days ?? 90);
         }
-      } catch {}
+      } catch (err) {
+        console.error('[pi-memory] auto-consolidation failed:', err);
+      }
     }
 
     const sessionId = ctx.sessionManager?.getCurrentSessionId?.() || Date.now().toString();
@@ -129,14 +131,20 @@ export default async function piMemoryExtension(pi: any) {
       try {
         const engine = new ConsolidationEngine(manager);
         engine.regenL1Index('*');
-      } catch {}
+      } catch (err) {
+        console.error('[pi-memory] L1 index regen failed:', err);
+      }
     }
 
     // Save database to disk
     if (db) {
-      const data = db.export();
-      const buffer = Buffer.from(data);
-      fs.writeFileSync(dbPath, buffer);
+      try {
+        const data = db.export();
+        const buffer = Buffer.from(data);
+        fs.writeFileSync(dbPath, buffer);
+      } catch (err) {
+        console.error('[pi-memory] database persist failed:', err);
+      }
     }
 
     // Reset injection state

@@ -46,8 +46,10 @@ export interface RecallResult {
 
 export interface MemoryStats {
   total: number;
-  byType: Record<MemoryType, number>;
-  byStatus: Record<MemoryStatus, number>;
+  // Type/status keys are only present when at least one memory of that
+  // kind exists (GROUP BY), so these are partial maps at runtime.
+  byType: Partial<Record<MemoryType, number>>;
+  byStatus: Partial<Record<MemoryStatus, number>>;
   byProject: Record<string, number>;
   lastConsolidation: number | null;
   avgConfidence: number;
