@@ -15,6 +15,7 @@ import { registerStatusTool } from './tools/status';
 import { registerMemoryStatusCommand } from './commands/memoryStatus';
 import { registerMemoryConsolidateCommand } from './commands/memoryConsolidate';
 import { registerMemoryExportCommand } from './commands/memoryExport';
+import { persistDatabase, createDebouncedFlush } from './persist';
 
 let db: Database | null = null;
 let manager: MemoryManager | null = null;
@@ -43,6 +44,18 @@ export default async function piMemoryExtension(pi: any) {
   manager = new MemoryManager(db);
   injector = new ContextInjector(manager);
   sessionWriter = new SessionWriter(memoryDir);
+
+  // ---- Durable persistence: debounced flush after every mutation ----
+  // sql.js is an in-memory DB; without per-mutation flushing, every write
+  // since the last clean session_shutdown is lost on a crash/SIGKILL. The
+  // flusher debounces rapid mutations into one atomic temp+fsync+rename
+  // write, and session_shutdown does a final immediate flush.
+  const getDb = () => db;
+  const flusher = createDebouncedFlush(() => {
+    const current = getDb();
+    if (current) persistDatabase(() => Buffer.from(current.export()), dbPath);
+  });
+  manager.onMutation = () => flusher.schedule();
 
   // ---- Register tools ----
   registerWriteTool(pi, manager);
@@ -76,6 +89,11 @@ export default async function piMemoryExtension(pi: any) {
 
   pi.on('agent_end', async (event: any, ctx: any) => {
     if (!sessionWriter || !manager) return;
+
+    // Belt-and-suspenders: flush any pending mutations so a crash after
+    // agent_end (but before session_shutdown) still persists this turn's
+    // writes. Debounced — coalesces with mutation-triggered flushes.
+    flusher.schedule();
 
     const project = hashCwd(ctx.cwd);
 
@@ -136,19 +154,9 @@ export default async function piMemoryExtension(pi: any) {
       }
     }
 
-    // Save database to disk (atomic: write temp then rename, so a crash
-    // mid-write cannot corrupt the existing db and lose all memories).
-    if (db) {
-      try {
-        const data = db.export();
-        const buffer = Buffer.from(data);
-        const tmpPath = dbPath + '.tmp';
-        fs.writeFileSync(tmpPath, buffer);
-        fs.renameSync(tmpPath, dbPath);
-      } catch (err) {
-        console.error('[pi-memory] database persist failed:', err);
-      }
-    }
+    // Final immediate flush: cancel any pending debounced timer and write
+    // the DB to disk now (atomic temp + fsync + unique-tmp rename).
+    flusher.flushNow();
 
     // Reset injection state
     injectedInThisSession = false;

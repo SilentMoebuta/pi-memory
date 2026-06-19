@@ -115,3 +115,44 @@ describe('MemoryManager', () => {
     });
   });
 });
+
+describe('MemoryManager mutation hook (onMutation)', () => {
+  it('fires onMutation after write()', async () => {
+    const d = await createTestDb();
+    const m = new MemoryManager(d);
+    let calls = 0;
+    m.onMutation = () => { calls++; };
+    m.write(createSampleMemory());
+    expect(calls).toBe(1);
+  });
+
+  it('fires onMutation after forget()', async () => {
+    const d = await createTestDb();
+    const m = new MemoryManager(d);
+    const mem = m.write(createSampleMemory());
+    let calls = 0;
+    m.onMutation = () => { calls++; };
+    m.forget(mem.id);
+    expect(calls).toBe(1);
+  });
+
+  it('fires onMutation after runSql() that touches the memories table', async () => {
+    const d = await createTestDb();
+    const m = new MemoryManager(d);
+    const mem = m.write(createSampleMemory());
+    let calls = 0;
+    // Reset so the write() above doesn't count
+    m.onMutation = () => { calls++; };
+    m.runSql('UPDATE memories SET confidence = ? WHERE id = ?', [0.5, mem.id]);
+    expect(calls).toBe(1);
+  });
+
+  it('does NOT fire onMutation for runSql() on a non-memories table', async () => {
+    const d = await createTestDb();
+    const m = new MemoryManager(d);
+    let calls = 0;
+    m.onMutation = () => { calls++; };
+    m.runSql('INSERT OR REPLACE INTO consolidation_cursor (project, last_processed_at) VALUES (?, ?)', ['p', 1]);
+    expect(calls).toBe(0);
+  });
+});

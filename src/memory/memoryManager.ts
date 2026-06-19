@@ -7,6 +7,10 @@ export class MemoryManager {
   // BM25 cache: rebuilt on demand, invalidated on any mutation to `memories`.
   private bm25Cache: { project: string | undefined; status: MemoryStatus | undefined; docs: string[]; memories: Memory[]; index: BM25Index } | null = null;
 
+  /** Optional hook fired after any mutation that should trigger a debounced
+   *  DB persist (set by the extension to durably flush writes to disk). */
+  onMutation?: () => void;
+
   constructor(private db: Database) {}
 
   /** Invalidate the BM25 cache (call after any mutation to `memories`). */
@@ -23,6 +27,7 @@ export class MemoryManager {
        VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, 'active')`,
       [id, input.type, input.content, input.confidence ?? 1.0, now, input.sessionId ?? null, input.project ?? 'default', input.source ?? 'agent']
     );
+    this.onMutation?.();
     return this.get(id)!;
   }
 
@@ -45,6 +50,7 @@ export class MemoryManager {
     if (!existing) return false;
     this.invalidateSearchCache();
     this.db.run('UPDATE memories SET status = ? WHERE id = ?', ['deleted', id]);
+    this.onMutation?.();
     return true;
   }
 
@@ -52,8 +58,11 @@ export class MemoryManager {
   runSql(sql: string, params?: any[]): void {
     if (params) this.db.run(sql, params);
     else this.db.run(sql);
-    // Invalidate cache when the SQL mutates the `memories` table.
-    if (/\bmemories\b/i.test(sql)) this.invalidateSearchCache();
+    // Invalidate cache + trigger persist when the SQL mutates the `memories` table.
+    if (/\bmemories\b/i.test(sql)) {
+      this.invalidateSearchCache();
+      this.onMutation?.();
+    }
   }
 
   execSql(sql: string, params?: any[]): any {

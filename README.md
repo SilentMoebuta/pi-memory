@@ -65,13 +65,33 @@ max_results = 20
 
 1. `session_start` → `before_agent_start` injects L1 context (once).
 2. Each turn → model calls `memory_write` / `memory_search` / `memory_recall`.
-3. `agent_end` → writes L2 session summary + lightweight decay if interval elapsed.
-4. `session_shutdown` → regenerates `MEMORY.md` (L1) + persists `agent.db`.
+3. `agent_end` → writes L2 session summary + lightweight decay if interval elapsed;
+   also schedules a debounced DB flush (belt-and-suspenders durability).
+4. `session_shutdown` → regenerates `MEMORY.md` (L1) + final immediate DB flush.
+
+## Durability & concurrency
+
+- **Per-mutation flush:** memories are persisted to `agent.db` via a debounced
+  (500ms) atomic write after every `memory_write` / `memory_forget` /
+  consolidation mutation, plus a final immediate flush on `session_shutdown`
+  and a debounced flush on `agent_end`. This survives SIGKILL / OOM / crashes
+  that bypass the shutdown handler with at most one debounced window of loss.
+- **Crash-safe atomic write:** each flush writes a unique temp file
+  (`agent.db.<pid>.<ms>.tmp`), `fsync`s it, then renames. The unique temp
+  name prevents collisions between concurrent pi processes; `fsync` before
+  rename forces bytes to stable storage so a power loss cannot leave a
+  truncated/empty DB.
+- **Known limitation — concurrent same-DB writes:** pi is single-process-per-
+  session by convention. If two processes both open the same project's
+  `agent.db` and both mutate it, the last writer wins on flush and the
+  other's writes are silently lost — file locking is not implemented. Do
+  not run two pi sessions against the same project concurrently if you
+  need both writers' memories preserved.
 
 ## Development
 
 ```
-npm test        # vitest (34 tests)
+npm test        # vitest (46 tests)
 npm run build   # tsc --noEmit
 ```
 
