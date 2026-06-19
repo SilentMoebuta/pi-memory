@@ -136,12 +136,15 @@ export default async function piMemoryExtension(pi: any) {
       }
     }
 
-    // Save database to disk
+    // Save database to disk (atomic: write temp then rename, so a crash
+    // mid-write cannot corrupt the existing db and lose all memories).
     if (db) {
       try {
         const data = db.export();
         const buffer = Buffer.from(data);
-        fs.writeFileSync(dbPath, buffer);
+        const tmpPath = dbPath + '.tmp';
+        fs.writeFileSync(tmpPath, buffer);
+        fs.renameSync(tmpPath, dbPath);
       } catch (err) {
         console.error('[pi-memory] database persist failed:', err);
       }
