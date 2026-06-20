@@ -117,10 +117,17 @@ export default async function piMemoryExtension(pi: any) {
 
   pi.on('before_agent_start', async (event: any, ctx: any) => {
     if (injectedInThisSession || !injector) return event;
-    injectedInThisSession = true;
-
+    // C4-3: buildContext can throw (DB read / schema drift); set the
+    // injected flag only on success so a failure doesn't permanently disable
+    // injection for the session — retry next before_agent_start.
     const project = hashCwd(ctx.cwd);
-    const context = injector.buildContext(project);
+    let context: string | null = null;
+    try {
+      context = injector ? injector.buildContext(project) : null;
+      if (context) injectedInThisSession = true;
+    } catch (err) {
+      console.error('[pi-memory] L1 context injection failed:', err);
+    }
 
     if (context) {
       return {
@@ -142,20 +149,24 @@ export default async function piMemoryExtension(pi: any) {
     const project = hashCwd(ctx.cwd);
 
     // ---- Auto-consolidate: lightweight decay if interval exceeded ----
-    const config = loadConfig();
-    if (config.consolidation?.auto_consolidate_on_end !== false) {
-      try {
-        const rows = manager.execSql(
-          'SELECT last_processed_at FROM consolidation_cursor WHERE project = ?', [project]
-        );
-        const lastCons = (rows?.[0]?.values?.[0]?.[0] as number) || 0;
-        const intervalMs = (config.consolidation?.min_interval_minutes ?? 30) * 60 * 1000;
-        if (Date.now() - lastCons > intervalMs) {
-          const engine = new ConsolidationEngine(manager);
-          engine.runDecay(project, config.consolidation?.decay_days ?? 30, config.consolidation?.archive_days ?? 90);
+    // C4-2: GM-13 read-only sessions must NOT mutate the in-memory DB
+    // (decays would leak into the stale L1 regen); skip the whole block.
+    if (!readOnly) {
+      const config = loadConfig();
+      if (config.consolidation?.auto_consolidate_on_end !== false) {
+        try {
+          const rows = manager.execSql(
+            'SELECT last_processed_at FROM consolidation_cursor WHERE project = ?', [project]
+          );
+          const lastCons = (rows?.[0]?.values?.[0]?.[0] as number) || 0;
+          const intervalMs = (config.consolidation?.min_interval_minutes ?? 30) * 60 * 1000;
+          if (Date.now() - lastCons > intervalMs) {
+            const engine = new ConsolidationEngine(manager);
+            engine.runDecay(project, config.consolidation?.decay_days ?? 30, config.consolidation?.archive_days ?? 90);
+          }
+        } catch (err) {
+          console.error('[pi-memory] auto-consolidation failed:', err);
         }
-      } catch (err) {
-        console.error('[pi-memory] auto-consolidation failed:', err);
       }
     }
 
@@ -178,18 +189,25 @@ export default async function piMemoryExtension(pi: any) {
       }
     }
 
-    sessionWriter.writeSession({
-      timestamp: Date.now(),
-      project,
-      sessionId,
-      lastResponse,
-      toolCalls,
-    });
+    // C4-4: GM-13 read-only sessions must not write L2 session markdown to
+    // the shared memory dir (side-effecting write that contradicts the
+    // read-only contract). Only the holder persists session summaries.
+    if (!readOnly) {
+      sessionWriter.writeSession({
+        timestamp: Date.now(),
+        project,
+        sessionId,
+        lastResponse,
+        toolCalls,
+      });
+    }
   });
 
   pi.on('session_shutdown', async () => {
-    // Regen L1 index before shutdown
-    if (manager) {
+    // Regen L1 index before shutdown.
+    // C4-1: GM-13 read-only sessions must NOT rewrite the shared MEMORY.md
+    // (would clobber the holder's L1 with a stale read-only snapshot).
+    if (manager && !readOnly) {
       try {
         const engine = new ConsolidationEngine(manager);
         engine.regenL1Index('*');

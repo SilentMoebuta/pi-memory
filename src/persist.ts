@@ -68,7 +68,11 @@ export function acquireLock(lockPath: string): LockHandle {
     fs.closeSync(fd);
     return { acquired: true, lockPath };
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    // C4-6: degrade to read-only (acquired:false) on ANY error, not just
+    // EEXIST — a read-only memory dir or invalid path must not crash init.
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') {
+      return { acquired: false, lockPath };
+    }
   }
   // Lockfile exists — steal it only if the recorded holder is dead.
   try {

@@ -77,14 +77,14 @@ export class ConsolidationEngine {
             );
             // GM-9: opt-in LLM-driven merge — propose merged content for the
             // keeper. On throw / null / empty, gracefully fall back to the
-            // jaccard-unioned keeper content above (no crash, no data loss).
+            // keeper content unchanged above (no crash, no data loss).
             if (this.opts?.llmMerge) {
               try {
                 const mergedContent = await this.opts.llmMerge(keeper.content, remove.content);
                 if (typeof mergedContent === 'string' && mergedContent.length > 0) {
                   this.manager.runSql('UPDATE memories SET content = ? WHERE id = ?', [mergedContent, keeper.id]);
                 }
-              } catch { /* graceful fallback to jaccard union */ }
+              } catch { /* graceful fallback: keeper content unchanged */ }
             }
             toMerge.add(remove.id);
             merged++;

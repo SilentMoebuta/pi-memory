@@ -47,7 +47,7 @@ describe('GM-1+GM-2 searchHybrid (semantic rerank via injected embedder)', () =>
     expect(hybrid.map(r => r.memory.id)).toEqual(plain.map(r => r.memory.id));
   });
 
-  it('falls back to BM25 for an empty query (no embedding needed)', async () => {
+  it('falls back to recency ranking for an empty query (no embedding needed)', async () => {
     const db = await createTestDb();
     const mgr = new MemoryManager(db, { embedder: fakeEmbedder });
     mgr.write(createSampleMemory({ content: 'common alpha', project: 'p' }));

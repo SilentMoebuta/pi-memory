@@ -16,14 +16,6 @@ CREATE TABLE IF NOT EXISTS memories (
     superseded_by TEXT
 );
 
--- TODO(v2): populate memory_links in consolidate() for contradiction/refinement detection
-CREATE TABLE IF NOT EXISTS memory_links (
-    source_id TEXT REFERENCES memories(id),
-    target_id TEXT REFERENCES memories(id),
-    relation TEXT CHECK(relation IN ('contradicts','refines','relates_to')),
-    PRIMARY KEY (source_id, target_id, relation)
-);
-
 CREATE TABLE IF NOT EXISTS consolidation_cursor (
     project TEXT PRIMARY KEY,
     last_processed_at INTEGER NOT NULL
