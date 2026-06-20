@@ -15,12 +15,14 @@ import { registerStatusTool } from './tools/status';
 import { registerMemoryStatusCommand } from './commands/memoryStatus';
 import { registerMemoryConsolidateCommand } from './commands/memoryConsolidate';
 import { registerMemoryExportCommand } from './commands/memoryExport';
-import { persistDatabase, createDebouncedFlush } from './persist';
+import { persistDatabase, createDebouncedFlush, acquireLock, releaseLock } from './persist';
 
 let db: Database | null = null;
 let manager: MemoryManager | null = null;
 let injector: ContextInjector | null = null;
 let sessionWriter: SessionWriter | null = null;
+let dbLock: ReturnType<typeof acquireLock> | null = null;
+let readOnly = false;
 
 export default async function piMemoryExtension(pi: any) {
   // ---- Initialize ----
@@ -30,6 +32,20 @@ export default async function piMemoryExtension(pi: any) {
 
   const dbPath = path.join(memoryDir, 'agent.db');
   const SQL = await initSqlJs();
+
+  // GM-13: acquire an exclusive lockfile before opening the DB. If another
+  // live pi process already holds it, switch this session to READ-ONLY so its
+  // flushes cannot clobber the holder's DB (the documented last-writer-wins
+  // data-loss class). A stale lock from a crashed holder is auto-stolen.
+  dbLock = acquireLock(dbPath + '.lock');
+  readOnly = !dbLock.acquired;
+  if (readOnly) {
+    console.warn(
+      '[pi-memory] Another live writer holds the DB lock at ' + dbPath + '.lock — ' +
+      'running READ-ONLY this session: writes will NOT be persisted, to avoid ' +
+      'clobbering the holder. (GM-13)'
+    );
+  }
 
   if (fs.existsSync(dbPath)) {
     const buffer = fs.readFileSync(dbPath);
@@ -52,10 +68,13 @@ export default async function piMemoryExtension(pi: any) {
   // write, and session_shutdown does a final immediate flush.
   const getDb = () => db;
   const flusher = createDebouncedFlush(() => {
+    if (readOnly) return; // GM-13: second writer must not clobber the holder
     const current = getDb();
     if (current) persistDatabase(() => Buffer.from(current.export()), dbPath);
   });
-  manager.onMutation = () => flusher.schedule();
+  manager.onMutation = () => {
+    if (!readOnly) flusher.schedule();
+  };
 
   // ---- Register tools ----
   registerWriteTool(pi, manager);
@@ -93,7 +112,8 @@ export default async function piMemoryExtension(pi: any) {
     // Belt-and-suspenders: flush any pending mutations so a crash after
     // agent_end (but before session_shutdown) still persists this turn's
     // writes. Debounced — coalesces with mutation-triggered flushes.
-    flusher.schedule();
+    // GM-13: skipped when read-only (second writer).
+    if (!readOnly) flusher.schedule();
 
     const project = hashCwd(ctx.cwd);
 
@@ -156,7 +176,9 @@ export default async function piMemoryExtension(pi: any) {
 
     // Final immediate flush: cancel any pending debounced timer and write
     // the DB to disk now (atomic temp + fsync + unique-tmp rename).
-    flusher.flushNow();
+    // GM-13: skipped when read-only; instead release the lock (if we held it).
+    if (!readOnly) flusher.flushNow();
+    if (dbLock) releaseLock(dbLock);
 
     // Reset injection state
     injectedInThisSession = false;

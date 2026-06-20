@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { persistDatabase, createDebouncedFlush } from '../src/persist';
+import { persistDatabase, createDebouncedFlush, acquireLock, releaseLock } from '../src/persist';
+import { spawnSync } from 'child_process';
 
 describe('persistDatabase', () => {
   const tmpDirs: string[] = [];
@@ -118,5 +119,68 @@ describe('createDebouncedFlush', () => {
     vi.advanceTimersByTime(1000);
     expect(flush).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+});
+
+// GM-13: file locking to prevent concurrent same-DB writers from silently
+// clobbering each other (documented data-loss limitation in README/persist.ts).
+describe('acquireLock / releaseLock (GM-13 file locking)', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+  });
+
+  function tmpLockPath(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-mem-lock-'));
+    tmpDirs.push(dir);
+    return path.join(dir, 'agent.db.lock');
+  }
+
+  it('grants the first caller and records the holder pid', () => {
+    const lockPath = tmpLockPath();
+    const h = acquireLock(lockPath);
+    expect(h.acquired).toBe(true);
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(fs.readFileSync(lockPath, 'utf8').trim()).toBe(String(process.pid));
+    releaseLock(h);
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('blocks a second caller while the first holds the lock (live holder)', () => {
+    const lockPath = tmpLockPath();
+    const h1 = acquireLock(lockPath);
+    expect(h1.acquired).toBe(true);
+    // Same-process second acquire: lockfile shows OUR pid (alive) -> blocked.
+    const h2 = acquireLock(lockPath);
+    expect(h2.acquired).toBe(false);
+    releaseLock(h1);
+    // After release, a fresh acquire succeeds.
+    const h3 = acquireLock(lockPath);
+    expect(h3.acquired).toBe(true);
+    releaseLock(h3);
+  });
+
+  it('steals a stale lockfile whose holder pid is dead', () => {
+    const lockPath = tmpLockPath();
+    // A guaranteed-dead pid: spawnSync blocks until the child exits, so its
+    // pid is no longer alive by the time we read it.
+    const dead = spawnSync('sh', ['-c', 'exit 0']);
+    expect(typeof dead.pid).toBe('number');
+    fs.writeFileSync(lockPath, String(dead.pid));
+    const h = acquireLock(lockPath);
+    expect(h.acquired).toBe(true); // stolen, not blocked
+    expect(fs.readFileSync(lockPath, 'utf8').trim()).toBe(String(process.pid));
+    releaseLock(h);
+  });
+
+  it('releaseLock is a no-op when the lock was not acquired', () => {
+    const lockPath = tmpLockPath();
+    const blocked = acquireLock(lockPath); // acquired (first)
+    const h2 = acquireLock(lockPath);     // blocked (second)
+    expect(h2.acquired).toBe(false);
+    expect(() => releaseLock(h2)).not.toThrow(); // must not unlink the holder's lock
+    expect(fs.existsSync(lockPath)).toBe(true); // holder's lock survives
+    releaseLock(blocked);
   });
 });

@@ -12,10 +12,10 @@ import * as fs from 'fs';
  *  - truncated/empty DB after a hard power loss between write and disk flush
  *    (fsync before rename forces the bytes to stable storage first)
  *
- * Known limitation: this does NOT prevent last-writer-wins data loss when two
- * processes both mutate the same shared DB and flush — that needs file
- * locking. pi is single-process-per-session by convention; concurrent edits
- * to one shared DB are out of scope. See README.
+ * Known limitation (mitigated by GM-13 locking in acquireLock above): without
+ * a DB-level lock, two processes both mutating the same shared DB and flushing
+ * would lose data last-writer-wins. `acquireLock` lets the extension detect a
+ * concurrent live writer and go read-only instead of clobbering it. See README.
  */
 export function persistDatabase(exportData: () => Buffer, dbPath: string): void {
   const buffer = exportData();
@@ -30,6 +30,69 @@ export function persistDatabase(exportData: () => Buffer, dbPath: string): void 
     fs.closeSync(fd);
   }
   fs.renameSync(tmpPath, dbPath);
+}
+
+/**
+ * GM-13: exclusive lockfile for the memory DB.
+ *
+ * `acquireLock` creates a lockfile atomically (O_EXCL) holding the owner's
+ * pid. A second acquirer sees the existing file and — if the recorded pid is
+ * still alive — is told the lock is held (`acquired: false`) so the extension
+ * can switch to read-only mode instead of silently clobbering the holder's DB
+ * (the documented last-writer-wins data-loss class). A stale lockfile whose
+ * holder has crashed is stolen automatically.
+ *
+ * This is a lockfile dance (not `flock`/`fcntl`) so it stays zero-dependency
+ * and works across processes by pid-liveness. Same-process re-acquire is
+ * blocked (the lockfile records our own pid, which is alive) — matching the
+ * cross-process semantics a single process would observe.
+ */
+export interface LockHandle {
+  acquired: boolean;
+  lockPath: string;
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function acquireLock(lockPath: string): LockHandle {
+  try {
+    const fd = fs.openSync(lockPath, 'wx');
+    fs.writeFileSync(fd, String(process.pid));
+    fs.closeSync(fd);
+    return { acquired: true, lockPath };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+  }
+  // Lockfile exists — steal it only if the recorded holder is dead.
+  try {
+    const holderPid = parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10);
+    if (Number.isFinite(holderPid) && holderPid > 0 && isPidAlive(holderPid)) {
+      return { acquired: false, lockPath };
+    }
+  } catch {
+    // unreadable / non-numeric -> treat as stale and steal below
+  }
+  try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+  try {
+    const fd = fs.openSync(lockPath, 'wx');
+    fs.writeFileSync(fd, String(process.pid));
+    fs.closeSync(fd);
+    return { acquired: true, lockPath };
+  } catch {
+    return { acquired: false, lockPath };
+  }
+}
+
+export function releaseLock(handle: LockHandle): void {
+  if (!handle.acquired) return;
+  try { fs.unlinkSync(handle.lockPath); } catch { /* already gone */ }
 }
 
 export interface DebouncedFlush {
