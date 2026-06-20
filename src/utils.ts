@@ -42,6 +42,10 @@ promote_min_sessions = 3
 decay_days = 30
 archive_days = 90
 max_sessions_per_consolidation = 10
+# GM-9: opt-in LLM-driven merge — when true, /memory-consolidate asks the
+# session model to propose merged content for high-similarity pairs (falls
+# back to jaccard on any error). Default false (zero model cost).
+llm_consolidate = false
 
 [search]
 bm25_k1 = 1.5

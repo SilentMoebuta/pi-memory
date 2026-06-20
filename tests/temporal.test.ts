@@ -31,7 +31,7 @@ describe('GM-7 temporal validity windows', () => {
     mgr.write(createSampleMemory({ content: 'dup xyz', project: 'p', confidence: 1.0 }));
     mgr.write(createSampleMemory({ content: 'dup xyz', project: 'p', confidence: 0.5 }));
     const engine = new ConsolidationEngine(mgr);
-    const { merged } = engine.runMerge('p', 0.6);
+    const { merged } = await engine.runMerge('p', 0.6);
     expect(merged).toBe(1);
     const all = mgr.getAll('p');
     const removed = all.find(m => m.status === 'superseded')!;
@@ -51,7 +51,7 @@ describe('GM-7 temporal validity windows', () => {
     const beforeSuper = Date.now();
     mgr.write(createSampleMemory({ content: 'temporal fact dup', project: 'p', confidence: 0.5 }));
     const engine = new ConsolidationEngine(mgr);
-    engine.runMerge('p', 0.6);
+    await engine.runMerge('p', 0.6);
     const afterSuper = Date.now() + 1;
     // Historical asOf (between write and supersede): the since-superseded fact
     // was valid then, so BOTH facts match the query.
@@ -70,7 +70,7 @@ describe('GM-7 temporal validity windows', () => {
     mgr.write(createSampleMemory({ content: 'nodefault dup', project: 'p', confidence: 1.0 }));
     mgr.write(createSampleMemory({ content: 'nodefault dup', project: 'p', confidence: 0.5 }));
     const engine = new ConsolidationEngine(mgr);
-    engine.runMerge('p', 0.6);
+    await engine.runMerge('p', 0.6);
     // No asOf: no valid_to filtering -> both keeper + superseded appear
     // (callers wanting current-only use status:'active', as before).
     const all = mgr.search('nodefault', { project: 'p' });

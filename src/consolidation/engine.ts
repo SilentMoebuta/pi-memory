@@ -13,7 +13,7 @@ function jaccardSimilarity(a: string, b: string): number {
 }
 
 export class ConsolidationEngine {
-  constructor(private manager: MemoryManager) {}
+  constructor(private manager: MemoryManager, private opts?: { llmMerge?: (a: string, b: string) => Promise<string | null> }) {}
 
   runDecay(project: string, decayDays: number, archiveDays: number): Pick<ConsolidationResult, 'decayed' | 'archived'> {
     const now = Date.now();
@@ -45,7 +45,7 @@ export class ConsolidationEngine {
     return { decayed, archived };
   }
 
-  runMerge(project: string, threshold: number): Pick<ConsolidationResult, 'merged'> {
+  async runMerge(project: string, threshold: number): Promise<Pick<ConsolidationResult, 'merged'>> {
     const memories = this.manager.getAll(project, 'active');
     if (memories.length < 2) return { merged: 0 };
 
@@ -75,6 +75,17 @@ export class ConsolidationEngine {
               'UPDATE memories SET status = ?, superseded_by = ?, valid_to = ? WHERE id = ?',
               ['superseded', keeper.id, Date.now(), remove.id]
             );
+            // GM-9: opt-in LLM-driven merge — propose merged content for the
+            // keeper. On throw / null / empty, gracefully fall back to the
+            // jaccard-unioned keeper content above (no crash, no data loss).
+            if (this.opts?.llmMerge) {
+              try {
+                const mergedContent = await this.opts.llmMerge(keeper.content, remove.content);
+                if (typeof mergedContent === 'string' && mergedContent.length > 0) {
+                  this.manager.runSql('UPDATE memories SET content = ? WHERE id = ?', [mergedContent, keeper.id]);
+                }
+              } catch { /* graceful fallback to jaccard union */ }
+            }
             toMerge.add(remove.id);
             merged++;
           }
@@ -96,9 +107,9 @@ export class ConsolidationEngine {
     return { promoted };
   }
 
-  consolidate(project: string, config: { decayDays: number; archiveDays: number; mergeThreshold: number; promoteMinSessions: number }): ConsolidationResult {
+  async consolidate(project: string, config: { decayDays: number; archiveDays: number; mergeThreshold: number; promoteMinSessions: number }): Promise<ConsolidationResult> {
     const { decayed, archived } = this.runDecay(project, config.decayDays, config.archiveDays);
-    const { merged } = this.runMerge(project, config.mergeThreshold);
+    const { merged } = await this.runMerge(project, config.mergeThreshold);
     const { promoted } = this.runPromote(config.promoteMinSessions);
 
     this.manager.runSql(
