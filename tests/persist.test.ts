@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { persistDatabase, createDebouncedFlush, acquireLock, releaseLock } from '../src/persist';
-import { spawnSync } from 'child_process';
 
 describe('persistDatabase', () => {
   const tmpDirs: string[] = [];
@@ -163,11 +162,12 @@ describe('acquireLock / releaseLock (GM-13 file locking)', () => {
 
   it('steals a stale lockfile whose holder pid is dead', () => {
     const lockPath = tmpLockPath();
-    // A guaranteed-dead pid: spawnSync blocks until the child exits, so its
-    // pid is no longer alive by the time we read it.
-    const dead = spawnSync('sh', ['-c', 'exit 0']);
-    expect(typeof dead.pid).toBe('number');
-    fs.writeFileSync(lockPath, String(dead.pid));
+    // A guaranteed-dead pid with negligible reuse risk: a very high pid is
+    // essentially never alive (no process) and the OS won't reassign a pid in
+    // this range during the test window. (spawnSync's child pid could be reused
+    // between exit and the isPidAlive check — a rare flake.)
+    const deadPid = 4_194_303; // near Linux pid_max; dead + not reused in-test
+    fs.writeFileSync(lockPath, String(deadPid));
     const h = acquireLock(lockPath);
     expect(h.acquired).toBe(true); // stolen, not blocked
     expect(fs.readFileSync(lockPath, 'utf8').trim()).toBe(String(process.pid));
