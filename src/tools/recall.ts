@@ -14,7 +14,7 @@ export function registerRecallTool(pi: any, manager: MemoryManager) {
       required: ['query', 'project'],
     },
     async execute(_id: string, params: any) {
-      const result = manager.recall(params.query, params.project);
+      const result = await manager.recall(params.query, params.project);
       const text = result.combined.map((r, i) =>
         `${i + 1}. [${r.memory.type}] ${r.memory.content}`
       ).join('\n') || 'No relevant memories found.';

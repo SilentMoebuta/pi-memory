@@ -52,6 +52,11 @@ bm25_k1 = 1.5
 bm25_b = 0.75
 max_results = 20
 jieba_path = ""
+# GM-1+GM-2: opt-in hybrid (semantic + BM25) retrieval. When true, lazily
+# loads a local embedding model (@xenova/transformers, ~23MB on first use) and
+# fuses cosine similarity with BM25 in recall/searchHybrid. Default false.
+hybrid = false
+embedding_model = "Xenova/all-MiniLM-L6-v2"
 `;
     fs.writeFileSync(configPath, defaultConfig, 'utf-8');
   }

@@ -27,7 +27,7 @@ describe('End-to-end integration', () => {
     expect(results.length).toBeGreaterThan(0);
 
     // Recall
-    const recall = manager.recall('认证', 'test');
+    const recall = await manager.recall('认证', 'test');
     expect(recall.combined.length).toBeGreaterThan(0);
 
     // Forget

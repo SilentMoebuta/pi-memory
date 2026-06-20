@@ -1,7 +1,8 @@
 import { Database } from 'sql.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Memory, MemoryInput, MemoryStatus, SearchOptions, SearchResult, RecallResult, MemoryStats } from '../types';
-import { BM25Index } from './search';
+import { BM25Index, tokenize } from './search';
+import { cosineSimilarity, fuseHybrid } from './hybrid';
 
 export class MemoryManager {
   // BM25 cache: rebuilt on demand, invalidated on any mutation to `memories`.
@@ -11,7 +12,7 @@ export class MemoryManager {
    *  DB persist (set by the extension to durably flush writes to disk). */
   onMutation?: () => void;
 
-  constructor(private db: Database) {}
+  constructor(private db: Database, private opts?: { embedder?: (text: string) => Promise<Float32Array> }) {}
 
   /** Invalidate the BM25 cache (call after any mutation to `memories`). */
   private invalidateSearchCache(): void {
@@ -123,9 +124,41 @@ export class MemoryManager {
     return results.slice(0, limit);
   }
 
-  recall(query: string, project: string): RecallResult {
-    const l2Results = this.search(query, { project, limit: 5 });
-    const l3Results = this.search(query, { limit: 5 });
+  /** GM-1+GM-2: hybrid retrieval — over-fetch BM25 candidates, then rerank by
+   *  additive fusion of normalized BM25 + cosine similarity (via the injected
+   *  embedder). Falls back to plain BM25 (`search`) when no embedder is
+   *  configured or the query is empty — so the default (hybrid=false) path is
+   *  unchanged. Embeddings are computed on-the-fly (no per-memory BLOB storage);
+   *  storage is a YAGNI optimization pending a measurable perf need. */
+  async searchHybrid(query: string, opts?: SearchOptions): Promise<SearchResult[]> {
+    const embedder = this.opts?.embedder;
+    if (!embedder || !query || query.trim().length === 0) {
+      return this.search(query, opts);
+    }
+    // Over-fetch candidates so semantic rerank has room to surface matches that
+    // BM25 ranked lower.
+    const overFetchLimit = (opts?.limit ?? 20) * 4;
+    const candidates = this.search(query, { ...opts, limit: overFetchLimit });
+    if (candidates.length === 0) return [];
+
+    const queryVec = await embedder(query);
+    const queryLen = tokenize(query).length;
+    const scored = await Promise.all(candidates.map(async (r) => {
+      const memVec = await embedder(r.memory.content);
+      const cosine = cosineSimilarity(queryVec, memVec);
+      const fused = fuseHybrid({ bm25Raw: r.score, queryLen, cosine }, { bm25: 1.0, semantic: 1.0 });
+      return { memory: r.memory, score: fused };
+    }));
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, opts?.limit ?? 20);
+  }
+
+  /** GM-1+GM-2: recall uses hybrid retrieval when an embedder is configured,
+   *  else plain BM25 search. */
+  async recall(query: string, project: string): Promise<RecallResult> {
+    const searchFn = this.opts?.embedder ? this.searchHybrid.bind(this) : this.search.bind(this);
+    const l2Results = await searchFn(query, { project, limit: 5 });
+    const l3Results = await searchFn(query, { limit: 5 });
     const l3Filtered = l3Results.filter(r =>
       r.memory.project !== project || r.memory.source === 'consolidated'
     );

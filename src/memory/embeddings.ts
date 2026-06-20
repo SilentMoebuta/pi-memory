@@ -26,23 +26,12 @@ export async function getEmbedder(modelName = 'Xenova/all-MiniLM-L6-v2'): Promis
 	cached = async (text: string): Promise<Float32Array> => {
 		const out = await extractor(text, { pooling: 'mean', normalize: true });
 		// @xenova returns a Tensor; coerce to a plain Float32Array view.
-		const data = (out as unknown as { data: Float32Array }).data;
-		return data;
+		return (out as unknown as { data: Float32Array }).data;
 	};
 	return cached;
 }
 
-/** Serialize a Float32Array to a BLOB for SQLite storage. */
-export function embeddingToBlob(vec: Float32Array): Buffer {
-	return Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength);
-}
-
-/** Deserialize a stored BLOB back to a Float32Array. */
-export function blobToEmbedding(blob: Buffer | Uint8Array | null): Float32Array | null {
-	if (!blob || blob.length === 0) return null;
-	return new Float32Array(
-		(blob instanceof Buffer ? blob : Buffer.from(blob)).buffer,
-		(blob instanceof Buffer ? blob : Buffer.from(blob)).byteOffset,
-		Math.floor((blob instanceof Buffer ? blob : Buffer.from(blob)).byteLength / 4),
-	);
-}
+// ponytail: embeddings are computed on-the-fly at search time (searchHybrid embeds
+// the query + each candidate's content). Per-memory BLOB storage + backfill is
+// a YAGNI optimization — add it only if on-the-fly embedding is measurably
+// slow for a real memory corpus (hundreds, not millions, of memories).

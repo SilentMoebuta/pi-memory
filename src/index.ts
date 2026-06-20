@@ -66,6 +66,25 @@ export default async function piMemoryExtension(pi: any) {
   injector = new ContextInjector(manager);
   sessionWriter = new SessionWriter(memoryDir);
 
+  // GM-1+GM-2: opt-in hybrid (semantic + BM25) retrieval. When
+  // config [search] hybrid=true, lazily load the local embedding model
+  // (@xenova/transformers — no service, no infra) and inject an embedder into
+  // the manager so searchHybrid/recall fuse cosine with BM25. Default false =
+  // zero model cost + zero download (plain BM25, unchanged).
+  const searchConfig = loadConfig().search;
+  if (searchConfig?.hybrid === true) {
+    try {
+      const { getEmbedder } = require('./memory/embeddings');
+      const modelName = searchConfig.embedding_model || 'Xenova/all-MiniLM-L6-v2';
+      const embedder = await getEmbedder(modelName);
+      // Re-create the manager with the embedder wired in.
+      manager = new MemoryManager(db, { embedder });
+      injector = new ContextInjector(manager);
+    } catch (err) {
+      console.error('[pi-memory] hybrid search enabled but embedder failed to load; falling back to BM25:', err);
+    }
+  }
+
   // ---- Durable persistence: debounced flush after every mutation ----
   // sql.js is an in-memory DB; without per-mutation flushing, every write
   // since the last clean session_shutdown is lost on a crash/SIGKILL. The

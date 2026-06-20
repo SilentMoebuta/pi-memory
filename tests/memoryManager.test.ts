@@ -93,10 +93,10 @@ describe('MemoryManager', () => {
   });
 
   describe('recall', () => {
-    it('should return L2 and L3 results', () => {
+    it('should return L2 and L3 results', async () => {
       manager.write(createSampleMemory({ content: 'Authentication uses JWT tokens', type: 'decision' }));
       manager.write(createSampleMemory({ content: 'Deploy to AWS using GitHub Actions', type: 'procedure' }));
-      const result = manager.recall('AWS', 'test-project');
+      const result = await manager.recall('AWS', 'test-project');
       expect(result.combined.length).toBeGreaterThan(0);
     });
   });
