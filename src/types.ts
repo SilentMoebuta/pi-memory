@@ -23,6 +23,10 @@ export interface Memory {
   project: string;
   source: MemorySource;
   status: MemoryStatus;
+  /** GM-7: when this fact became valid (NULL for pre-migration rows = always). */
+  validFrom: number | null;
+  /** GM-7: when this fact was superseded/expired (NULL = still current). */
+  validTo: number | null;
   supersededBy: string | null;
 }
 
@@ -31,6 +35,10 @@ export interface SearchOptions {
   project?: string;
   limit?: number;
   status?: MemoryStatus;
+  /** GM-7: query memories valid at this timestamp (valid_from <= asOf AND
+   *  (valid_to IS NULL OR valid_to > asOf)). Omit to leave validity unfiltered
+   *  (default, non-breaking) — callers wanting current-only use status:'active'. */
+  asOf?: number;
 }
 
 export interface SearchResult {

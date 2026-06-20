@@ -2,7 +2,7 @@ import initSqlJs, { Database } from 'sql.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { MemoryManager } from './memory/memoryManager';
-import { CREATE_TABLES, INIT_VERSION } from './memory/schema';
+import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS } from './memory/schema';
 import { ContextInjector } from './context/injector';
 import { SessionWriter } from './consolidation/sessionWriter';
 import { ConsolidationEngine } from './consolidation/engine';
@@ -56,6 +56,11 @@ export default async function piMemoryExtension(pi: any) {
 
   db.run(CREATE_TABLES);
   db.run(INIT_VERSION);
+  // GM-7: temporal validity windows migration (idempotent — ALTER errors if
+  // the column already exists on a pre-migrated DB).
+  for (const stmt of MIGRATE_V2_STATEMENTS) {
+    try { db.run(stmt); } catch { /* column already exists */ }
+  }
 
   manager = new MemoryManager(db);
   injector = new ContextInjector(manager);

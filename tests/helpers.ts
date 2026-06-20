@@ -1,5 +1,5 @@
 import initSqlJs, { Database } from 'sql.js';
-import { CREATE_TABLES, INIT_VERSION } from '../src/memory/schema';
+import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS } from '../src/memory/schema';
 import { Memory, MemoryInput } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -10,6 +10,10 @@ export async function createTestDb(): Promise<Database> {
   const db = new SQL.Database();
   db.run(CREATE_TABLES);
   db.run(INIT_VERSION);
+  // GM-7: run the v2 migration (idempotent — ALTER errors if column exists).
+  for (const stmt of MIGRATE_V2_STATEMENTS) {
+    try { db.run(stmt); } catch { /* column already exists */ }
+  }
   return db;
 }
 

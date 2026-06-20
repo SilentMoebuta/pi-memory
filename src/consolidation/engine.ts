@@ -72,8 +72,8 @@ export class ConsolidationEngine {
               [remove.accessCount, remove.confidence, keeper.id]
             );
             this.manager.runSql(
-              'UPDATE memories SET status = ?, superseded_by = ? WHERE id = ?',
-              ['superseded', keeper.id, remove.id]
+              'UPDATE memories SET status = ?, superseded_by = ?, valid_to = ? WHERE id = ?',
+              ['superseded', keeper.id, Date.now(), remove.id]
             );
             toMerge.add(remove.id);
             merged++;

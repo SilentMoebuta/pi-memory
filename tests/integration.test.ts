@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import initSqlJs from 'sql.js';
 import { MemoryManager } from '../src/memory/memoryManager';
-import { CREATE_TABLES, INIT_VERSION } from '../src/memory/schema';
+import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS } from '../src/memory/schema';
 import { ConsolidationEngine } from '../src/consolidation/engine';
 import { ContextInjector } from '../src/context/injector';
 
@@ -11,6 +11,9 @@ describe('End-to-end integration', () => {
     const db = new SQL.Database();
     db.run(CREATE_TABLES);
     db.run(INIT_VERSION);
+    for (const stmt of MIGRATE_V2_STATEMENTS) {
+      try { db.run(stmt); } catch { /* GM-7: column already exists */ }
+    }
     const manager = new MemoryManager(db);
 
     // Write
