@@ -47,16 +47,26 @@ describe('GM-7 temporal validity windows', () => {
     const db = await createTestDb();
     const mgr = new MemoryManager(db);
     // Two facts; merge supersedes the lower-confidence one (sets its valid_to).
-    mgr.write(createSampleMemory({ content: 'temporal fact dup', project: 'p', confidence: 1.0 }));
-    const beforeSuper = Date.now();
-    mgr.write(createSampleMemory({ content: 'temporal fact dup', project: 'p', confidence: 0.5 }));
+    // Backdate valid_from to FIXED deterministic timestamps to eliminate the
+    // ms-race flake (beforeSuper vs 2nd-write validFrom landing in different ms).
+    const t0 = Date.now() - 10000;
+    const m1 = mgr.write(createSampleMemory({ content: 'temporal fact dup', project: 'p', confidence: 1.0 }));
+    const m2 = mgr.write(createSampleMemory({ content: 'temporal fact dup', project: 'p', confidence: 0.5 }));
+    mgr.runSql('UPDATE memories SET valid_from = ? WHERE id = ?', [t0, m1.id]);
+    mgr.runSql('UPDATE memories SET valid_from = ? WHERE id = ?', [t0 + 1, m2.id]);
+    const beforeSuper = t0 + 5000; // deterministically AFTER both valid_from, BEFORE merge
     const engine = new ConsolidationEngine(mgr);
     await engine.runMerge('p', 0.6);
+    // Identify the superseded memory (its valid_to was set by merge). The
+    // test's INTENT: at a past asOf (before supersede), the since-superseded
+    // fact was still valid → returned.
+    const all = mgr.getAll('p');
+    const superseded = all.find(m => m.status === 'superseded')!;
     const afterSuper = Date.now() + 1;
-    // Historical asOf (between write and supersede): the since-superseded fact
-    // was valid then, so BOTH facts match the query.
+    // Historical asOf (before supersede): superseded fact's valid_from <= asOf
+    // and valid_to (set at merge, after beforeSuper) > asOf → still valid → returned.
     const historical = mgr.search('temporal fact', { project: 'p', asOf: beforeSuper });
-    expect(historical.length).toBeGreaterThanOrEqual(2);
+    expect(historical.some(r => r.memory.id === superseded.id)).toBe(true);
     // Future/current asOf: the superseded fact's valid_to <= afterSuper, so
     // only the keeper is valid.
     const current = mgr.search('temporal fact', { project: 'p', asOf: afterSuper });
