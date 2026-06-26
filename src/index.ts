@@ -2,7 +2,7 @@ import initSqlJs, { Database } from 'sql.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { MemoryManager } from './memory/memoryManager';
-import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS } from './memory/schema';
+import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS, MIGRATE_V3_STATEMENTS } from './memory/schema';
 import { ContextInjector } from './context/injector';
 import { SessionWriter } from './consolidation/sessionWriter';
 import { ConsolidationEngine } from './consolidation/engine';
@@ -61,6 +61,13 @@ export default async function piMemoryExtension(pi: any) {
   for (const stmt of MIGRATE_V2_STATEMENTS) {
     try { db.run(stmt); } catch { /* column already exists */ }
   }
+  // v3: per-role isolation — adds 'role' column + backfills existing rows to
+  // 'main' (idempotent: ALTER errors if column exists; UPDATE is a no-op once
+  // all rows non-NULL).
+  for (const stmt of MIGRATE_V3_STATEMENTS) {
+    try { db.run(stmt); } catch { /* column already exists */ }
+  }
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_memories_project_role ON memories(project, role)'); } catch { /* index exists */ }
 
   manager = new MemoryManager(db);
   injector = new ContextInjector(manager);

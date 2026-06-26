@@ -1,5 +1,5 @@
 import initSqlJs, { Database } from 'sql.js';
-import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS } from '../src/memory/schema';
+import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS, MIGRATE_V3_STATEMENTS } from '../src/memory/schema';
 import { Memory, MemoryInput } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -14,6 +14,12 @@ export async function createTestDb(): Promise<Database> {
   for (const stmt of MIGRATE_V2_STATEMENTS) {
     try { db.run(stmt); } catch { /* column already exists */ }
   }
+  // v3: per-role isolation — adds 'role' column + backfill NULLs to 'main'.
+  for (const stmt of MIGRATE_V3_STATEMENTS) {
+    try { db.run(stmt); } catch { /* column already exists */ }
+  }
+  // v3 index (idempotent) — partition by (project, role) for role-scoped queries.
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_memories_project_role ON memories(project, role)'); } catch { /* index exists */ }
   return db;
 }
 

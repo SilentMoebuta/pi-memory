@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const CREATE_TABLES = `
 CREATE TABLE IF NOT EXISTS memories (
@@ -48,4 +48,29 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_VERSION});
 export const MIGRATE_V2_STATEMENTS = [
   'ALTER TABLE memories ADD COLUMN valid_from INTEGER',
   'ALTER TABLE memories ADD COLUMN valid_to INTEGER',
+];
+
+/**
+ * V3 migration: per-role memory isolation.
+ *
+ * Adds `role` column (default 'main') so memories are partitioned by
+ * (project, role) instead of just (project). Values: 'main' (main agent,
+ * including in-place /role persona switches — see main_agent_persona_memory_research.md),
+ * '<roleName>' (spawn_role subagents, e.g. 'researcher'/'coder'), 'shared'
+ * (cross-role read-only shared knowledge, e.g. generic methodology).
+ *
+ * Two statements: (1) ADD COLUMN with DEFAULT 'main' (applies to NEW rows),
+ * (2) UPDATE backfill existing v2 rows that got NULL on ALTER (SQLite ALTER
+ * ADD COLUMN with DEFAULT only defaults new rows, not existing). Both are
+ * idempotent — wrapped in try/catch by callers (column-add errors if exists;
+ * UPDATE is a no-op once all rows are non-NULL).
+ *
+ * Rationale (research-backed): controlled sharing, not full isolation.
+ * Letta/Claude Code/CrewAI all default to per-agent bucketing with opt-in
+ * sharing. 'shared' sentinel is the opt-in shared namespace (read-only by
+ * the injector layer). See multi_agent_memory_isolation_research.md.
+ */
+export const MIGRATE_V3_STATEMENTS = [
+  "ALTER TABLE memories ADD COLUMN role TEXT NOT NULL DEFAULT 'main'",
+  "UPDATE memories SET role = 'main' WHERE role IS NULL",
 ];
