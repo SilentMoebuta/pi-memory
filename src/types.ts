@@ -51,6 +51,10 @@ export interface SearchOptions {
    *  a spawned role's search does not surface another role's private
    *  memories). Omit to search across all roles (admin/regen use only). */
   role?: string;
+  /** v3 refresh-on-access: when true, returned memories have confidence
+   *  restored (MIN(1.0, +0.2)) + last_access updated. Set by search/recall
+   *  TOOLS (real user access); false for internal callers (regen/consolidation). */
+  refreshOnAccess?: boolean;
 }
 
 export interface SearchResult {

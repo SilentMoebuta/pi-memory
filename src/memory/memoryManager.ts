@@ -106,7 +106,8 @@ export class MemoryManager {
         return b.memory.createdAt - a.memory.createdAt;
       });
       const limit = opts?.limit ?? 20;
-      return results.slice(0, limit);
+      const sliced = results.slice(0, limit);
+      return opts?.refreshOnAccess ? this._refreshOnAccess(sliced) : sliced;
     }
 
     // BM25 with caching: reuse index when project/status scope unchanged.
@@ -129,7 +130,37 @@ export class MemoryManager {
     }
 
     const limit = opts?.limit ?? 20;
-    return results.slice(0, limit);
+    const sliced = results.slice(0, limit);
+    return opts?.refreshOnAccess ? this._refreshOnAccess(sliced) : sliced;
+  }
+
+  /** v3 refresh-on-access: when memories are surfaced in search results (the
+   *  true "access" event — not internal get() reads), restore their confidence
+   *  toward 1.0 (capped) + update last_access. Research: LangGraph
+   *  refresh_on_read=true (default), GenAgents recency decays since last
+   *  retrieval. Idempotent at 1.0. Batched single UPDATE per result set. */
+  private _refreshOnAccess(results: SearchResult[]): SearchResult[] {
+    if (results.length === 0) return results;
+    const now = Date.now();
+    for (const r of results) {
+      this.db.run(
+        'UPDATE memories SET last_access = ?, confidence = MIN(1.0, confidence + 0.2) WHERE id = ? AND status != ?',
+        [now, r.memory.id, 'deleted']
+      );
+    }
+    // Re-fetch updated confidence so returned SearchResult reflects the bump.
+    return results.map((r) => ({ ...r, memory: this._readRaw(r.memory.id) ?? r.memory }));
+  }
+
+  /** Read a memory by id WITHOUT side effects (no access_count bump, no
+   *  refresh) — used by _refreshOnAccess to reflect post-update state. */
+  private _readRaw(id: string): Memory | null {
+    const rows = this.db.exec(
+      'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role FROM memories WHERE id = ?',
+      [id]
+    );
+    if (!rows.length || !rows[0].values.length) return null;
+    return this._rowToMemory(rows[0].values[0]);
   }
 
   /** GM-1+GM-2: hybrid retrieval — over-fetch BM25 candidates, then rerank by
@@ -163,10 +194,10 @@ export class MemoryManager {
 
   /** GM-1+GM-2: recall uses hybrid retrieval when an embedder is configured,
    *  else plain BM25 search. */
-  async recall(query: string, project: string, role: string = 'main'): Promise<RecallResult> {
+  async recall(query: string, project: string, role: string = 'main', refreshOnAccess: boolean = false): Promise<RecallResult> {
     const searchFn = this.opts?.embedder ? this.searchHybrid.bind(this) : this.search.bind(this);
-    const l2Results = await searchFn(query, { project, role, limit: 5 });
-    const l3Results = await searchFn(query, { role, limit: 5 });
+    const l2Results = await searchFn(query, { project, role, limit: 5, refreshOnAccess });
+    const l3Results = await searchFn(query, { role, limit: 5, refreshOnAccess });
     const l3Filtered = l3Results.filter(r =>
       r.memory.project !== project || r.memory.source === 'consolidated'
     );

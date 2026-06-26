@@ -22,6 +22,7 @@ export function registerSearchTool(pi: any, manager: MemoryManager) {
         project: params.project,
         role: params.role ?? 'main',
         limit: params.limit ?? 20,
+        refreshOnAccess: true,
       });
       if (results.length === 0) {
         return { content: [{ type: 'text', text: 'No matching memories found.' }], details: {} };

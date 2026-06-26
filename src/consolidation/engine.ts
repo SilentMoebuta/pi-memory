@@ -16,23 +16,19 @@ export class ConsolidationEngine {
   constructor(private manager: MemoryManager, private opts?: { llmMerge?: (a: string, b: string) => Promise<string | null> }) {}
 
   runDecay(project: string, decayDays: number, archiveDays: number): Pick<ConsolidationResult, 'decayed' | 'archived'> {
+    // v3 retention: L3 is PERMANENT (research: Letta/LangGraph/CrewAI/Claude Code
+    // all default archival to unlimited; 30/90d time-archiving had no industry
+    // precedent — see memory_retention_strategy_research.md). We keep recency
+    // decay (lower confidence for ranking) but NO archiving — memories stay
+    // 'active' regardless of age. Forgetting is explicit (forget tool) or via
+    // conflict-merge in runMerge, never time-driven deletion.
     const now = Date.now();
     const decayThreshold = now - decayDays * 24 * 60 * 60 * 1000;
-    const archiveThreshold = now - archiveDays * 24 * 60 * 60 * 1000;
-
-    const archives = this.manager.getAll(project, 'active').filter(m =>
-      m.createdAt < archiveThreshold &&
-      (m.lastAccess === null || m.lastAccess < archiveThreshold)
-    );
-
-    let archived = 0;
-    for (const m of archives) {
-      this.manager.runSql('UPDATE memories SET status = ? WHERE id = ?', ['archived', m.id]);
-      archived++;
-    }
 
     const toDecay = this.manager.getAll(project, 'active').filter(m =>
-      m.createdAt < decayThreshold && m.createdAt >= archiveThreshold
+      m.createdAt < decayThreshold &&
+      (m.lastAccess === null || m.lastAccess < decayThreshold) &&
+      m.role !== 'shared' // shared namespace read-only: never decayed (always top-ranked)
     );
 
     let decayed = 0;
@@ -42,18 +38,23 @@ export class ConsolidationEngine {
       decayed++;
     }
 
-    return { decayed, archived };
+    // archived count always 0 — archiving removed (L3 permanent).
+    return { decayed, archived: 0 };
   }
 
   async runMerge(project: string, threshold: number): Promise<Pick<ConsolidationResult, 'merged'>> {
     const memories = this.manager.getAll(project, 'active');
     if (memories.length < 2) return { merged: 0 };
 
+    // v3: group by (type, role) so merges never cross role buckets — prevents
+    // 串味 via consolidation. 'shared' is its own group (read-only namespace:
+    // shared dups merge within shared, never with role-private).
     const byType: Map<string, typeof memories> = new Map();
     for (const m of memories) {
-      const group = byType.get(m.type) || [];
+      const key = `${m.type}::${m.role}`;
+      const group = byType.get(key) || [];
       group.push(m);
-      byType.set(m.type, group);
+      byType.set(key, group);
     }
 
     let merged = 0;

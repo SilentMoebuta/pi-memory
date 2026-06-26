@@ -26,13 +26,13 @@ describe('ConsolidationEngine', () => {
       expect(mem!.confidence).toBeLessThan(1.0);
     });
 
-    it('should archive very old memories', () => {
+    it('v3: very old memories stay active (L3 permanent, no time-archiving)', () => {
       const veryOld = Date.now() - 91 * 24 * 60 * 60 * 1000;
       db.run('INSERT INTO memories (id, type, content, confidence, created_at, project, source, status) VALUES (?,?,?,?,?,?,?,?)',
         ['old2', 'fact', 'Very old fact', 1.0, veryOld, 'test', 'agent', 'active']);
       engine.runDecay('test', 30, 90);
       const mem = manager.get('old2');
-      expect(mem!.status).toBe('archived');
+      expect(mem!.status).toBe('active'); // v3: L3 permanent — no time-archiving
     });
 
     it('should not decay recent memories', () => {
