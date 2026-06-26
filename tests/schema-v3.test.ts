@@ -42,8 +42,8 @@ function hasColumn(db: Database, table: string, column: string): boolean {
 }
 
 describe("schema v3 migration (role isolation)", () => {
-  it("SCHEMA_VERSION bumped to 3", () => {
-    expect(SCHEMA_VERSION).toBe(3);
+  it("SCHEMA_VERSION bumped to >=3 (v3 role + v4 importance)", () => {
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(3);
   });
 
   it("MIGRATE_V3_STATEMENTS adds 'role' column to memories table", async () => {

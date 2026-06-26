@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import initSqlJs from 'sql.js';
 import { MemoryManager } from '../src/memory/memoryManager';
-import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS, MIGRATE_V3_STATEMENTS } from '../src/memory/schema';
+import { CREATE_TABLES, INIT_VERSION, MIGRATE_V2_STATEMENTS, MIGRATE_V3_STATEMENTS, MIGRATE_V4_STATEMENTS } from '../src/memory/schema';
 import { ConsolidationEngine } from '../src/consolidation/engine';
 import { ContextInjector } from '../src/context/injector';
 
@@ -18,6 +18,9 @@ describe('End-to-end integration', () => {
       try { db.run(stmt); } catch { /* v3: role column already exists */ }
     }
     try { db.run('CREATE INDEX IF NOT EXISTS idx_memories_project_role ON memories(project, role)'); } catch { /* index exists */ }
+    for (const stmt of MIGRATE_V4_STATEMENTS) {
+      try { db.run(stmt); } catch { /* v4: importance column already exists */ }
+    }
     const manager = new MemoryManager(db);
 
     // Write

@@ -14,6 +14,12 @@ export interface MemoryInput {
    *  (cross-role read-only namespace). Defaults to 'main'. The agent
    *  self-identifies via this param (agentic pattern). */
   role?: string;
+  /** Intrinsic hardness (0-1), distinct from confidence (which decays with
+   *  recency). High for schema/API/config facts, low for transient preferences.
+   *  Defaults by type (fact/procedure=0.8, correction/decision=0.6,
+   *  preference=0.3) — RESEARCH CAVEAT: values are推理需实战验证, mechanism
+   *  is强证据 (GenAgents importance, CrewAI importance_weight). */
+  importance?: number;
 }
 
 export interface Memory {
@@ -35,6 +41,8 @@ export interface Memory {
   supersededBy: string | null;
   /** Per-role isolation bucket: 'main' | '<roleName>' | 'shared'. */
   role: string;
+  /** Intrinsic hardness (0-1). High = schema/API/config (抗衰减). */
+  importance: number;
 }
 
 export interface SearchOptions {

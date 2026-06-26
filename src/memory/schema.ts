@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const CREATE_TABLES = `
 CREATE TABLE IF NOT EXISTS memories (
@@ -73,4 +73,23 @@ export const MIGRATE_V2_STATEMENTS = [
 export const MIGRATE_V3_STATEMENTS = [
   "ALTER TABLE memories ADD COLUMN role TEXT NOT NULL DEFAULT 'main'",
   "UPDATE memories SET role = 'main' WHERE role IS NULL",
+];
+
+/**
+ * V4 migration: importance dimension for抗衰减 ranking.
+ *
+ * Adds `importance` column (REAL, default 0.5). Distinct from confidence
+ * (which decays with recency): importance is the INTRINSIC hardness of the
+ * fact (schema/API/config = high; transient preference = low). High-importance
+ *硬事实 ranks above decayed low-importance memories in empty-query fallback.
+ *
+ * Type-based defaults assigned at write time (see MemoryManager.write) —
+ * RESEARCH CAVEAT (memory_retention_strategy_research.md): exact default
+ * values are推理, need实战验证; the MECHANISM (importance as a ranking
+ * dimension separate from recency) is强证据 (GenAgents importance, CrewAI
+ * importance_weight 0.4).
+ */
+export const MIGRATE_V4_STATEMENTS = [
+  "ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5",
+  "UPDATE memories SET importance = 0.5 WHERE importance IS NULL",
 ];

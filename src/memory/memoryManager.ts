@@ -1,6 +1,6 @@
 import { Database } from 'sql.js';
 import { v4 as uuidv4 } from 'uuid';
-import { Memory, MemoryInput, MemoryStatus, SearchOptions, SearchResult, RecallResult, MemoryStats } from '../types';
+import { Memory, MemoryInput, MemoryStatus, MemoryType, SearchOptions, SearchResult, RecallResult, MemoryStats } from '../types';
 import { BM25Index, tokenize } from './search';
 import { cosineSimilarity, fuseHybrid } from './hybrid';
 
@@ -23,14 +23,29 @@ export class MemoryManager {
     const id = uuidv4();
     const now = Date.now();
     const role = input.role ?? 'main';
+    const importance = input.importance ?? this._defaultImportance(input.type);
     this.invalidateSearchCache();
     this.db.run(
-      `INSERT INTO memories (id, type, content, confidence, access_count, created_at, session_id, project, source, status, valid_from, role)
-       VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, 'active', ?, ?)`,
-      [id, input.type, input.content, input.confidence ?? 1.0, now, input.sessionId ?? null, input.project ?? 'default', input.source ?? 'agent', now, role]
+      `INSERT INTO memories (id, type, content, confidence, access_count, created_at, session_id, project, source, status, valid_from, role, importance)
+       VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+      [id, input.type, input.content, input.confidence ?? 1.0, now, input.sessionId ?? null, input.project ?? 'default', input.source ?? 'agent', now, role, importance]
     );
     this.onMutation?.();
     return this.get(id)!;
+  }
+
+  /** Type-based default importance. RESEARCH CAVEAT (memory_retention_strategy_research.md):
+   *  exact values are推理需实战验证; the ranking MECHANISM (importance as a
+   *  dimension抗 recency decay) is强证据 (GenAgents, CrewAI importance_weight 0.4). */
+  private _defaultImportance(type: MemoryType): number {
+    switch (type) {
+      case 'fact': return 0.8;       // schema/API/config contracts — hard, stable
+      case 'procedure': return 0.8; // repeatable how-to — stable
+      case 'correction': return 0.6; // lessons learned — moderately stable
+      case 'decision': return 0.6;  // choices — moderate
+      case 'preference': return 0.3; // transient taste — soft, decays fast
+      default: return 0.5;
+    }
   }
 
   get(id: string): Memory | null {
@@ -38,7 +53,7 @@ export class MemoryManager {
       [Date.now(), id, 'deleted']);
 
     const rows = this.db.exec(
-      'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role FROM memories WHERE id = ?',
+      'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role, importance FROM memories WHERE id = ?',
       [id]
     );
     if (!rows.length || !rows[0].values.length) return null;
@@ -100,6 +115,10 @@ export class MemoryManager {
         results = results.filter(r => r.memory.type === opts.type);
       }
       results.sort((a, b) => {
+        // v4: importance primary (硬事实抗衰减), then confidence (recency), then recency.
+        if (b.memory.importance !== a.memory.importance) {
+          return b.memory.importance - a.memory.importance;
+        }
         if (b.memory.confidence !== a.memory.confidence) {
           return b.memory.confidence - a.memory.confidence;
         }
@@ -156,7 +175,7 @@ export class MemoryManager {
    *  refresh) — used by _refreshOnAccess to reflect post-update state. */
   private _readRaw(id: string): Memory | null {
     const rows = this.db.exec(
-      'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role FROM memories WHERE id = ?',
+      'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role, importance FROM memories WHERE id = ?',
       [id]
     );
     if (!rows.length || !rows[0].values.length) return null;
@@ -288,7 +307,7 @@ export class MemoryManager {
   getAll(project?: string, status?: MemoryStatus): Memory[] {
     // Wildcard '*' means all projects (used by regenL1Index / context injection).
     const effectiveProject = project && project !== '*' ? project : undefined;
-    let sql = 'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role FROM memories WHERE status != ?';
+    let sql = 'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role, importance FROM memories WHERE status != ?';
     const params: any[] = ['deleted'];
     if (effectiveProject) { sql += ' AND project = ?'; params.push(effectiveProject); }
     if (status) { sql += ' AND status = ?'; params.push(status); }
@@ -308,6 +327,7 @@ export class MemoryManager {
       validFrom: row[12] ?? null,
       validTo: row[13] ?? null,
       role: row[14] ?? 'main',
+      importance: row[15] ?? 0.5,
     };
   }
 }
