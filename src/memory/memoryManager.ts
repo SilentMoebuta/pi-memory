@@ -83,6 +83,13 @@ export class MemoryManager {
         (m.validTo === null || m.validTo > opts.asOf!)
       );
     }
+    // v3: per-role isolation — when opts.role is set, keep only memories in
+    // the caller's own bucket OR the shared (cross-role) namespace. Prevents
+    // 串味: a spawned researcher's search does not surface main agent's or
+    // coder's private memories. Omit role to search across all (admin/regen).
+    if (opts?.role !== undefined) {
+      memories = memories.filter(m => m.role === opts.role || m.role === 'shared');
+    }
     if (memories.length === 0) return [];
 
     // Empty query: BM25 gives every doc score 0 (filtered out), so skip BM25
@@ -156,10 +163,10 @@ export class MemoryManager {
 
   /** GM-1+GM-2: recall uses hybrid retrieval when an embedder is configured,
    *  else plain BM25 search. */
-  async recall(query: string, project: string): Promise<RecallResult> {
+  async recall(query: string, project: string, role: string = 'main'): Promise<RecallResult> {
     const searchFn = this.opts?.embedder ? this.searchHybrid.bind(this) : this.search.bind(this);
-    const l2Results = await searchFn(query, { project, limit: 5 });
-    const l3Results = await searchFn(query, { limit: 5 });
+    const l2Results = await searchFn(query, { project, role, limit: 5 });
+    const l3Results = await searchFn(query, { role, limit: 5 });
     const l3Filtered = l3Results.filter(r =>
       r.memory.project !== project || r.memory.source === 'consolidated'
     );

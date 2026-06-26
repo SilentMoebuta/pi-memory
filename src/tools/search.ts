@@ -11,6 +11,7 @@ export function registerSearchTool(pi: any, manager: MemoryManager) {
         query: { type: 'string', description: 'Search query' },
         type: { type: 'string', description: 'Filter by type' },
         project: { type: 'string', description: 'Filter by project' },
+        role: { type: 'string', description: "Your role isolation bucket (default 'main'). Pass your role name if you are a spawned role subagent; 'shared' content is always visible. Prevents cross-role memory contamination." },
         limit: { type: 'number', description: 'Max results (default 20)' },
       },
       required: ['query'],
@@ -19,6 +20,7 @@ export function registerSearchTool(pi: any, manager: MemoryManager) {
       const results = manager.search(params.query, {
         type: params.type as any,
         project: params.project,
+        role: params.role ?? 'main',
         limit: params.limit ?? 20,
       });
       if (results.length === 0) {

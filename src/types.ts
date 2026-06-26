@@ -46,6 +46,11 @@ export interface SearchOptions {
    *  (valid_to IS NULL OR valid_to > asOf)). Omit to leave validity unfiltered
    *  (default, non-breaking) — callers wanting current-only use status:'active'. */
   asOf?: number;
+  /** Per-role isolation filter. When set, only memories where
+   *  role === this value OR role === 'shared' are returned (prevents串味:
+   *  a spawned role's search does not surface another role's private
+   *  memories). Omit to search across all roles (admin/regen use only). */
+  role?: string;
 }
 
 export interface SearchResult {
