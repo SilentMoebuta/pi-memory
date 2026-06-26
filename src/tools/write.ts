@@ -12,6 +12,7 @@ export function registerWriteTool(pi: any, manager: MemoryManager) {
         type: { type: 'string', description: 'Memory type: fact, decision, preference, procedure, correction' },
         content: { type: 'string', description: 'The memory content to store' },
         project: { type: 'string', description: 'Project scope (defaults to current project)' },
+        role: { type: 'string', description: "Role isolation bucket: 'main' (main agent, incl. in-place /role switch — default), your role name if you are a spawned role subagent (e.g. 'researcher', 'coder'), or 'shared' for cross-role read-only knowledge. Prevents memory cross-contamination across roles." },
       },
       required: ['type', 'content'],
     },
@@ -20,6 +21,7 @@ export function registerWriteTool(pi: any, manager: MemoryManager) {
         type: params.type,
         content: params.content,
         project: params.project || hashCwd(ctx.cwd),
+        role: params.role,
       });
       return {
         content: [{ type: 'text', text: `Memory recorded: [${memory.id}] ${memory.content}` }],

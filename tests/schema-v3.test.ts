@@ -109,3 +109,42 @@ describe("schema v3 migration (role isolation)", () => {
     expect(stored.sort()).toEqual([...roles].sort());
   });
 });
+
+// ── Step 2: write/get carry role ────────────────────────────────────────────
+
+import { MemoryManager } from "../src/memory/memoryManager";
+import { createTestDb } from "./helpers";
+
+describe("role in write/get (isolation write path)", () => {
+  it("write with role='researcher' stores role='researcher'", async () => {
+    const db = await createTestDb();
+    const mgr = new MemoryManager(db);
+    const m = mgr.write({ type: "fact", content: "researcher finding", project: "p", role: "researcher" } as any);
+    expect(m.role).toBe("researcher");
+    expect(mgr.get(m.id)!.role).toBe("researcher");
+  });
+
+  it("write without role defaults to 'main' (main agent)", async () => {
+    const db = await createTestDb();
+    const mgr = new MemoryManager(db);
+    const m = mgr.write({ type: "fact", content: "main agent fact", project: "p" });
+    expect(m.role).toBe("main");
+  });
+
+  it("write with role='shared' stores shared (cross-role namespace)", async () => {
+    const db = await createTestDb();
+    const mgr = new MemoryManager(db);
+    const m = mgr.write({ type: "procedure", content: "generic research methodology", project: "p", role: "shared" } as any);
+    expect(m.role).toBe("shared");
+  });
+
+  it("getAll returns role field on memories", async () => {
+    const db = await createTestDb();
+    const mgr = new MemoryManager(db);
+    mgr.write({ type: "fact", content: "a", project: "p", role: "coder" } as any);
+    mgr.write({ type: "fact", content: "b", project: "p" });
+    const all = mgr.getAll("p");
+    expect(all.some((m) => m.role === "coder")).toBe(true);
+    expect(all.some((m) => m.role === "main")).toBe(true);
+  });
+});

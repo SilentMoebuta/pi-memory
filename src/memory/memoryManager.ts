@@ -22,11 +22,12 @@ export class MemoryManager {
   write(input: MemoryInput): Memory {
     const id = uuidv4();
     const now = Date.now();
+    const role = input.role ?? 'main';
     this.invalidateSearchCache();
     this.db.run(
-      `INSERT INTO memories (id, type, content, confidence, access_count, created_at, session_id, project, source, status, valid_from)
-       VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, 'active', ?)`,
-      [id, input.type, input.content, input.confidence ?? 1.0, now, input.sessionId ?? null, input.project ?? 'default', input.source ?? 'agent', now]
+      `INSERT INTO memories (id, type, content, confidence, access_count, created_at, session_id, project, source, status, valid_from, role)
+       VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, 'active', ?, ?)`,
+      [id, input.type, input.content, input.confidence ?? 1.0, now, input.sessionId ?? null, input.project ?? 'default', input.source ?? 'agent', now, role]
     );
     this.onMutation?.();
     return this.get(id)!;
@@ -37,7 +38,7 @@ export class MemoryManager {
       [Date.now(), id, 'deleted']);
 
     const rows = this.db.exec(
-      'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to FROM memories WHERE id = ?',
+      'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role FROM memories WHERE id = ?',
       [id]
     );
     if (!rows.length || !rows[0].values.length) return null;
@@ -249,7 +250,7 @@ export class MemoryManager {
   getAll(project?: string, status?: MemoryStatus): Memory[] {
     // Wildcard '*' means all projects (used by regenL1Index / context injection).
     const effectiveProject = project && project !== '*' ? project : undefined;
-    let sql = 'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to FROM memories WHERE status != ?';
+    let sql = 'SELECT id, type, content, confidence, access_count, last_access, created_at, session_id, project, source, status, superseded_by, valid_from, valid_to, role FROM memories WHERE status != ?';
     const params: any[] = ['deleted'];
     if (effectiveProject) { sql += ' AND project = ?'; params.push(effectiveProject); }
     if (status) { sql += ' AND status = ?'; params.push(status); }
@@ -268,6 +269,7 @@ export class MemoryManager {
       supersededBy: row[11],
       validFrom: row[12] ?? null,
       validTo: row[13] ?? null,
+      role: row[14] ?? 'main',
     };
   }
 }

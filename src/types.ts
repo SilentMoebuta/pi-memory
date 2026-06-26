@@ -9,6 +9,11 @@ export interface MemoryInput {
   sessionId?: string;
   confidence?: number;
   source?: MemorySource;
+  /** Per-role isolation bucket: 'main' (main agent incl. in-place /role switch),
+   *  '<roleName>' (spawned role subagent, e.g. 'researcher'), 'shared'
+   *  (cross-role read-only namespace). Defaults to 'main'. The agent
+   *  self-identifies via this param (agentic pattern). */
+  role?: string;
 }
 
 export interface Memory {
@@ -28,6 +33,8 @@ export interface Memory {
   /** GM-7: when this fact was superseded/expired (NULL = still current). */
   validTo: number | null;
   supersededBy: string | null;
+  /** Per-role isolation bucket: 'main' | '<roleName>' | 'shared'. */
+  role: string;
 }
 
 export interface SearchOptions {
