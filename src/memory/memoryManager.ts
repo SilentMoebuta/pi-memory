@@ -282,6 +282,18 @@ export class MemoryManager {
       }
     }
 
+    // P1-4: per-role-bucket counts — surfaces what agent auto-learned per role
+    // in /memory-status (user audit). Reuses the role column added in P0-3.
+    const roleRow = this.db.exec(
+      `SELECT role, COUNT(*) FROM memories WHERE status != ?${projectFilter} GROUP BY role`, params
+    );
+    const byRole: Record<string, number> = {};
+    if (roleRow.length) {
+      for (const row of roleRow[0].values) {
+        byRole[row[0] as string] = row[1] as number;
+      }
+    }
+
     const avgParams: any[] = [];
     if (project) avgParams.push(project);
     const avgConfRow = this.db.exec(
@@ -300,6 +312,7 @@ export class MemoryManager {
       byType: byType as any,
       byStatus: byStatus as any,
       byProject,
+      byRole,
       lastConsolidation,
       avgConfidence,
     };

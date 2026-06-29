@@ -156,3 +156,28 @@ describe('MemoryManager mutation hook (onMutation)', () => {
     expect(calls).toBe(0);
   });
 });
+
+// ── P1-4: getStats byRole 维度 ──────────────────────────────────────────────
+
+describe('P1-4: getStats includes role dimension', () => {
+  it('byRole counts memories per role bucket', async () => {
+    const db = await createTestDb();
+    const mgr = new MemoryManager(db);
+    mgr.write({ type: 'fact', content: 'main fact', project: 'p', role: 'main' } as any);
+    mgr.write({ type: 'fact', content: 'main fact 2', project: 'p', role: 'main' } as any);
+    mgr.write({ type: 'fact', content: 'researcher fact', project: 'p', role: 'researcher' } as any);
+    mgr.write({ type: 'fact', content: 'shared', project: 'p', role: 'shared' } as any);
+    const stats = mgr.getStats('p');
+    expect(stats.byRole).toBeDefined();
+    expect(stats.byRole['main']).toBe(2);
+    expect(stats.byRole['researcher']).toBe(1);
+    expect(stats.byRole['shared']).toBe(1);
+  });
+
+  it('byRole undefined when no memories', async () => {
+    const db = await createTestDb();
+    const mgr = new MemoryManager(db);
+    const stats = mgr.getStats('empty-project');
+    expect(stats.byRole).toEqual({});
+  });
+});

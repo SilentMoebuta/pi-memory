@@ -83,6 +83,8 @@ export interface MemoryStats {
   byType: Partial<Record<MemoryType, number>>;
   byStatus: Partial<Record<MemoryStatus, number>>;
   byProject: Record<string, number>;
+  /** P1-4: per-role-bucket counts (main/researcher/shared/...). */
+  byRole: Record<string, number>;
   lastConsolidation: number | null;
   avgConfidence: number;
 }

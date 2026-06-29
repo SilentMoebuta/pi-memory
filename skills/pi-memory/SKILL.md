@@ -54,7 +54,7 @@ headers; pi-memory infers from the param). Default `main`.
 
 ## Tools
 
-- `memory_write` — Store a new fact, decision, preference, procedure, or correction
+- `memory_write` — Store a fact, decision, preference, procedure, or correction. **Proactively use during work** when you learn something worth remembering — no need to wait for the user to ask. Especially: user corrects you (store as `correction`), important design decision made (store as `decision`), user states preference/convention (store as `preference`), reusable fact/procedure discovered (store as `fact`/`procedure`). One lesson per write, keep concise.
 - `memory_search` — Search memories by keyword
 - `memory_recall` — Recursive L2→L3 recall for complex queries
 - `memory_forget` — Remove incorrect or outdated memories

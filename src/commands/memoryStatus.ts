@@ -15,6 +15,9 @@ export function registerMemoryStatusCommand(pi: any, manager: MemoryManager) {
         'By Type:',
         ...Object.entries(stats.byType).map(([t, c]) => `  ${t}: ${c || 0}`),
         '',
+        'By Role (P1-4 — audit what each role auto-learned):',
+        ...Object.entries(stats.byRole || {}).map(([r, c]) => `  ${r}: ${c || 0}`),
+        '',
         `Last consolidation: ${stats.lastConsolidation ? new Date(stats.lastConsolidation).toLocaleString() : 'never'}`,
       ];
       ctx.ui.notify(lines.join('\n'), 'info');
