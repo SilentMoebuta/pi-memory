@@ -22,6 +22,30 @@ Layered memory system for pi agent. Stores facts, decisions, preferences, proced
 | L2 | Session summaries | Keyword search via memory_recall |
 | L3 | Long-term knowledge | Stored in SQLite, per-(project, role) |
 
+## Just-in-Time Injection (P1-7)
+
+The常驻 memory block (L1, injected once at session start via `before_agent_start`)
+shows only a **memory index** (type + count per bucket), NOT memory content.
+To retrieve actual memory text, call the `memory_recall` tool on-demand with a
+query. This keeps the常驻 block tiny (~137 token for a 5-memory project vs the
+old ~2300 token top-N pre-fetch) and avoids bloating context on every turn
+(even a `hello`).
+
+This is **结构性强制** (structural enforcement, not a prompt hint): the常驻
+block literally has no content to read, so the LLM must call `memory_recall`
+to get prior context. Research-backed (Letta/MemGPT/Claude Code all use this
+分层注入 pattern; Anthropic memory-tool calls it 'just-in-time context
+retrieval').
+
+- `before_agent_start` injects the index once (re-injected after session
+  switch/fork/compact — the常驻 block lives in system prompt, not messages,
+  so compaction只压 messages不动常驻).
+- `memory_recall(query, project, role)` returns L2 + L3 full text on-demand.
+- Sub-sessions (spawn_role) inherit the same极小 index (no full父 block).
+
+RESEARCH CAVEAT: the <800 token budget + index entry limits are推理需实战
+验证 (noted in code); tune via `config.memory.l1_token_budget`.
+
 ## Per-Role Isolation (v3+) & Retention (v3+)
 
 Memories are partitioned by `(project, role)` to prevent **串味** (memory
