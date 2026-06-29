@@ -1,78 +1,82 @@
+/**
+ * ContextInjector — P1-7 just-in-time injection.
+ *
+ * Research (memory_context_injection_research.md / memory_injection_p1_7_research.md):
+ *  - Industry default is "分层注入": tiny常驻 (in-context) + 按需 (out-of-context tool).
+ *  - pi's old "top-N facts + top-3 recent 正文常驻 ~2300 token" is the反模式.
+ *  - Key mechanism = **结构性强制**: 常驻只放记忆索引(类型计数 + 引导),
+ *    NOT正文. LLM wanting memory body MUST call memory_recall (already exists).
+ *    This is what makes just-in-time actually fire — not prompt hints.
+ *  - 常驻属 system prompt; compaction只压 messages不动常驻 (Letta/MemGPT/Claude Code一致).
+ *  - RESEARCH CAVEAT: exact token budget <800 / index entries are推理需实战验证.
+ */
 import { MemoryManager } from '../memory/memoryManager';
 import { MemoryStats } from '../types';
 import { loadConfig } from '../utils';
 
 export class ContextInjector {
   private injected = false;
-  private l1Budget: number;
-  private l2Budget: number;
+  /** 常驻预算(token). 极小: 索引概要 + 引导语. RESEARCH CAVEAT: <800是推理需实战验证. */
+  private readonly l1Budget: number;
 
   constructor(
     private manager: MemoryManager,
     l1Budget?: number,
-    l2Budget?: number,
+    _l2Budget?: number, // kept for back-compat; L2 正文预取已移除(结构性强制)
   ) {
-    // Prefer config.toml values; fall back to constructor arg then defaults.
     const config = loadConfig();
-    this.l1Budget = l1Budget ?? config?.memory?.l1_token_budget ?? 1500;
-    this.l2Budget = l2Budget ?? config?.memory?.l2_token_budget ?? 800;
+    // 默认 800 token(现状 1500+800=2300 → 压到 800). 可经 config.memory.l1_token_budget 覆盖.
+    this.l1Budget = l1Budget ?? config?.memory?.l1_token_budget ?? 800;
   }
 
   buildContext(project: string): string {
     if (this.injected) return '';
     this.injected = true;
-
-    const parts: string[] = [];
-    const stats = this.manager.getStats(project);
-
-    const l1 = this._buildL1(project, stats);
-    if (l1) parts.push(l1);
-
-    const l2 = this._buildL2(project);
-    if (l2) parts.push(l2);
-
-    return parts.join('\n\n');
+    return this._buildL1(project);
   }
 
   reset(): void {
     this.injected = false;
   }
 
-  private _buildL1(project: string, stats: MemoryStats): string {
+  /** L1 = 极小常驻索引块. 只含记忆索引(类型计数 + 引导), 不含正文.
+   *  结构性强制: LLM 想要记忆正文必须调 memory_recall 工具按需拉. */
+  private _buildL1(project: string): string {
+    const stats = this.manager.getStats(project);
+    if (stats.total === 0) return '';
+
     const lines: string[] = [
-      '## Memory (auto-generated)',
+      '## Memory Index (just-in-time)',
       '',
-      `Project: ${project}`,
-      `Total memories: ${stats.total} (active: ${stats.byStatus['active'] || 0})`,
+      `Project: ${project} | Total memories: ${stats.total} (active: ${stats.byStatus['active'] || 0})`,
+      '',
+      '### Memory Index by Type',
     ];
 
-    const topFacts = this.manager.search('', { project, limit: 10 });
-    const activeFacts = topFacts.filter(r => r.memory.status === 'active');
-    if (activeFacts.length > 0) {
-      lines.push('');
-      lines.push('### Key Knowledge');
-      for (const r of activeFacts.slice(0, 8)) {
-        lines.push(`- [${r.memory.type}] ${r.memory.content}`);
-      }
+    // 索引: 按类型计数(不含正文). 让 LLM 知道有什么类型的记忆可 recall.
+    const byType = stats.byType || {};
+    const typeEntries = Object.entries(byType)
+      .filter(([, count]) => count > 0)
+      .map(([type, count]) => `- ${type}: ${count} ${count === 1 ? 'entry' : 'entries'}`);
+    if (typeEntries.length > 0) {
+      lines.push(...typeEntries);
+    } else {
+      lines.push('- (no typed memories)');
     }
 
-    const result = lines.join('\n');
-    if (result.length > this.l1Budget * 4) {
-      return result.slice(0, this.l1Budget * 4) + '\n...';
-    }
-    return result;
-  }
+    // 结构性强制引导: 明确告诉 LLM 正文不在常驻, 要调 recall
+    lines.push('');
+    lines.push('### How to access memory content');
+    lines.push('This index shows WHAT memories exist, not their content. To retrieve actual');
+    lines.push('memory content, call the memory_recall tool with a query (e.g. recall "architecture');
+    lines.push('decisions" or "API contracts"). Memory_recall returns full text + does not bloat');
+    lines.push('this常驻 block. Use it on-demand when you need specific prior context.');
 
-  private _buildL2(project: string): string {
-    const recent = this.manager.search('', { project, limit: 5, status: 'active' });
-    if (recent.length === 0) return '';
-    const lines = ['### Recent Session Context'];
-    for (const r of recent.slice(0, 3)) {
-      lines.push(`- ${r.memory.content}`);
-    }
     const result = lines.join('\n');
-    if (result.length > this.l2Budget * 4) {
-      return result.slice(0, this.l2Budget * 4) + '\n...';
+    // 预算截断(索引本身应远小于预算, 这是安全网)
+    const charBudget = this.l1Budget * 4;
+    if (result.length > charBudget) {
+      return result.slice(0, charBudget) + '\n...';
     }
     return result;
   }
