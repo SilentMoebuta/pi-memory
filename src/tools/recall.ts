@@ -4,7 +4,7 @@ export function registerRecallTool(pi: any, manager: MemoryManager) {
   pi.registerTool({
     name: 'memory_recall',
     label: 'Recall Memory',
-    description: 'Recall full memory content on-demand (just-in-time retrieval). The常驻 memory block only shows an INDEX of what memories exist (type + count) — it does NOT contain memory content. Call this tool to retrieve actual memory text when you need specific prior context (e.g. past decisions, API contracts, prior debugging lessons, project conventions). Use a focused query. Returns L2 (recent session) + L3 (long-term) results. Prefer this over re-deriving context you may already have stored.',
+    description: 'Recursively recall memories across L2/L3 tiers for a query.',
     parameters: {
       type: 'object',
       properties: {

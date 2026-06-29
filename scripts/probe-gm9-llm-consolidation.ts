@@ -2,7 +2,7 @@
 // callable built from ctx.model + complete() (the opt-in LLM consolidation
 // path). Needs a configured provider + network.
 //
-// Env note (this sandbox): could NOT execute — no network egress (ksyun/HF
+// Env note (this sandbox): could NOT execute — no network egress (testprov/HF
 // unreachable). The engine logic (llmMerge result -> keeper content; throw/null
 // -> jaccard fallback) is TDD-proven in tests/llm-consolidation.test.ts with a
 // fake callable; this probe verifies the real-model wiring (memoryConsolidate
